@@ -37,26 +37,20 @@ public class Container {
 
         /*
         // Примерный ход работы
-
         String className = bean.getClassName();
         Class clazz = Class.forName(className);
         // ищем дефолтный конструктор
         Object ob = clazz.newInstance();
-
-
         for (String name : bean.getProperties().keySet()) {
             // ищем поле с таким именен внутри класса
             // учитывая приватные
             Field field = clazz.getDeclaredField(name);
             // проверяем, если такого поля нет, то кидаем InvalidConfigurationException с описание ошибки
-
             // Делаем приватные поля доступными
             field.setAccessible(true);
-
             // Далее определяем тип поля и заполняем его
             // Если поле - примитив, то все просто
             // Если поле ссылка, то эта ссылка должа была быть инициализирована ранее
-
             */
 
     }
