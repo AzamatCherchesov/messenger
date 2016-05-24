@@ -268,7 +268,7 @@ public class Client implements ConnectionHandler {
     }
 
     /**
-     * Отправка сообщения в сокет клиент -> сервер/
+     * Отправка сообщения в сокет клиент -> сервер
      */
     @Override
     public void send(Message msg) throws IOException, ProtocolException {
