@@ -5,12 +5,19 @@ package arhangel.dim.core;
  */
 public class User {
     private Long id;
-    private String login;
-    private String secret;
+    private String name;
+    private String hash;
 
-    public User(String login, String secret) {
-        setLogin(login);
-        setSecret(secret);
+    public User() {
+    }
+
+    public User(final String name) {
+        this.name = name;
+    }
+
+    public User(final String name, final String password) {
+        this.name = name;
+        hash = password;
     }
 
     public Long getId() {
@@ -21,19 +28,32 @@ public class User {
         this.id = id;
     }
 
-    public String getLogin() {
-        return login;
+    public String getName() {
+        return name;
     }
 
-    public void setLogin(String login) {
-        this.login = login;
+    public void setName(String name) {
+        this.name = name;
     }
 
-    public String getSecret() {
-        return secret;
+    public void setHash(final String hash) {
+        this.hash = hash;
     }
 
-    public void setSecret(String secret) {
-        this.secret = secret;
+    public String getHash() {
+        return hash;
+    }
+
+    public void setPass(final String password) {
+        hash = password;
+    }
+
+    @Override
+    public String toString() {
+        return "User{" +
+                "userName='" + name + '\'' +
+                ", hash=" + hash +
+                ", userID=" + id +
+                '}';
     }
 }

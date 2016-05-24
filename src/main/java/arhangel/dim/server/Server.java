@@ -2,105 +2,163 @@ package arhangel.dim.server;
 
 import arhangel.dim.container.Context;
 import arhangel.dim.container.InvalidConfigurationException;
+import arhangel.dim.core.command.CreateChatCommand;
+import arhangel.dim.core.command.HistChatCommand;
+import arhangel.dim.core.command.InfoCommand;
+import arhangel.dim.core.command.ListChatCommand;
+import arhangel.dim.core.command.LoginCommand;
+import arhangel.dim.core.command.RegisterCommand;
+import arhangel.dim.core.command.TextCommand;
+import arhangel.dim.core.dbservice.dao.UsersDao;
+import arhangel.dim.core.messages.CommandExecutor;
+import arhangel.dim.core.messages.Type;
 import arhangel.dim.core.net.Protocol;
-import arhangel.dim.core.net.ProtocolException;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 import arhangel.dim.core.net.Session;
-import arhangel.dim.core.store.DaoFactory;
 import arhangel.dim.core.store.MessageStore;
+import arhangel.dim.core.store.MessageStoreImpl;
 import arhangel.dim.core.store.UserStore;
-import arhangel.dim.lections.exception.ExceptionDemo;
+import arhangel.dim.core.store.UserStoreImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.StandardSocketOptions;
+import java.nio.channels.AsynchronousChannelGroup;
+import java.nio.channels.AsynchronousServerSocketChannel;
+import java.sql.SQLException;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Основной класс для сервера сообщений
  */
-
 public class Server {
 
-    static Logger log = LoggerFactory.getLogger(Server.class);
-    public static final int DEFAULT_MAX_CONNECT = 16;
-
-    // Засетить из конфига
+    private static Logger log = LoggerFactory.getLogger(Server.class);
+    private int bufferSize = 256 * 32;
     private int port;
     private Protocol protocol;
+    private final ExecutorService threadPool = Executors.newCachedThreadPool();
+    private Set<Session> sessions = new HashSet<>();
+    private CommandExecutor commandExecutor = new CommandExecutor();
 
-    private DaoFactory daoFactory;
+    private UsersDao usersDao = new UsersDao();
+    private MessageStore messageStore = new MessageStoreImpl(usersDao);
+    private UserStore userStore = new UserStoreImpl(usersDao);
+    private AsynchronousChannelGroup channelGroup;
+    private AsynchronousServerSocketChannel serverSocketChannel;
 
-    private int maxConnection = DEFAULT_MAX_CONNECT;
 
-    private ServerSocket socket;
-    private ExecutorService service;
+    public Server(){}
 
-    public UserStore getUserStore() {
-        return daoFactory.getUserDao();
+    public void init( ) throws IOException {
+        try {
+            usersDao.init();
+            this.commandExecutor.addCommand(Type.MSG_REGISTER, new RegisterCommand());
+            this.commandExecutor.addCommand(Type.MSG_LOGIN, new LoginCommand(this));
+            this.commandExecutor.addCommand(Type.MSG_INFO, new InfoCommand(this));
+            this.commandExecutor.addCommand(Type.MSG_CHAT_CREATE, new CreateChatCommand(this));
+            this.commandExecutor.addCommand(Type.MSG_CHAT_HIST, new HistChatCommand(this));
+            this.commandExecutor.addCommand(Type.MSG_TEXT, new TextCommand(this));
+            this.commandExecutor.addCommand(Type.MSG_CHAT_LIST, new ListChatCommand(this));
+
+            channelGroup = AsynchronousChannelGroup.withThreadPool(threadPool);
+            serverSocketChannel = AsynchronousServerSocketChannel.open(channelGroup);
+            serverSocketChannel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+            serverSocketChannel.bind(new InetSocketAddress(port));
+
+        } catch (ClassNotFoundException | SQLException e) {
+            e.printStackTrace();
+        }
     }
 
-    public MessageStore getMessageStore() {
-        return daoFactory.getMessageDao();
+    public void start() {
+        AcceptCompletionHandler acceptCompletionHandler = new AcceptCompletionHandler(this, serverSocketChannel);
+        serverSocketChannel.accept(null, acceptCompletionHandler);
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException e) {
+            log.info("[run] Main thread interrupted");
+        }
     }
 
-    //FIXME: concurrent
-    private List<Session> sessions;
+    public void stop() {
 
-    public List<Session> getSessions() {
-        return sessions;
+    }
+
+    public int getBufferSize() {
+        return bufferSize;
+    }
+
+    public AsynchronousServerSocketChannel getServerSocketChannel() {
+        return serverSocketChannel;
+    }
+
+    public AsynchronousChannelGroup getChannelGroup() {
+        return channelGroup;
+    }
+
+    public int getPort() {
+        return port;
+    }
+
+    public void setPort(int port) {
+        this.port = port;
     }
 
     public Protocol getProtocol() {
         return protocol;
     }
 
-    public void stop() {
-        // TODO: закрыть все сетевые подключения, остановить потоки-обработчики, закрыть ресурсы, если есть.
+    public void setIProtocol(Protocol protocol) {
+        this.protocol = protocol;
     }
 
-    public void init() throws IOException {
-        socket = new ServerSocket(port);
-        service = Executors.newFixedThreadPool(maxConnection);
-        sessions = new ArrayList<>();
+    public void  setExecutor(CommandExecutor executor) {
+        this.commandExecutor = executor;
     }
 
-    public void run() throws IOException {
-        while (true) {
-            Socket clientSocket = socket.accept();
-            log.info("Accepted " + clientSocket.getInetAddress());
-
-            service.submit(() -> {
-                Session session = new Session(this);
-                session.setUser(null);
-                session.setSocket(clientSocket);
-                try {
-                    session.setIn(clientSocket.getInputStream());
-                    session.setOut(clientSocket.getOutputStream());
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                sessions.add(session);
-                byte[] buf = new byte[256 * 64];
-                while (true) {
-                    /*int size = */session.getIn().read(buf);
-                    //FIXME: check for closed socket and remove session from session list
-                    session.onMessage(protocol.decode(buf));
-                }
-            });
-        }
+    public CommandExecutor getExecutor() {
+        return commandExecutor;
     }
 
-    public static void main(String[] args) {
+    public void setUsersDao(UsersDao usersDao) {
+        this.usersDao = usersDao;
+    }
 
+    public UsersDao getUsersDao() {
+        return usersDao;
+    }
+
+    public void setMessageStore(MessageStore messageStore) {
+        this.messageStore = messageStore;
+    }
+
+    public MessageStore getMessageStore() {
+        return messageStore;
+    }
+
+    public void setUserStore(UserStore userStore) {
+        this.userStore = userStore;
+    }
+
+    public UserStore getUserStore() {
+        return userStore;
+    }
+
+    public void setSessions(Set<Session> sessions) {
+        this.sessions = sessions;
+    }
+
+    public Set<Session> getSessions() {
+        return sessions;
+    }
+
+
+
+    public static void main(String[] args) throws Exception {
         Server server = null;
         // Пользуемся механизмом контейнера
         try {
@@ -110,15 +168,13 @@ public class Server {
             log.error("Failed to create server: configuration error", e);
             return;
         }
-        try {
-            server.init();
-            server.run();
-        } catch (Exception e) {
-            log.error("Application failed.", e);
-        } finally {
-            if (server != null) {
-                server.stop();
-            }
-        }
+        server.init();
+
+        //Protocol stringProtocol = new StringProtocol();
+        //Server server = new Server(19000);
+        //server.setIProtocol(stringProtocol);
+        server.start();
     }
+
+
 }

@@ -6,24 +6,29 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Scanner;
+import java.util.stream.Collectors;
 
+import arhangel.dim.core.messages.CreateChatMessage;
+import arhangel.dim.core.messages.HistChatMessage;
+import arhangel.dim.core.messages.HistChatResultMessage;
+import arhangel.dim.core.messages.InfoMessage;
+import arhangel.dim.core.messages.ListChatMessage;
+import arhangel.dim.core.messages.ListChatResultMessage;
 import arhangel.dim.core.messages.LoginMessage;
 import arhangel.dim.core.messages.Message;
 import arhangel.dim.core.messages.RegisterMessage;
+import arhangel.dim.core.messages.StatusMessage;
 import arhangel.dim.core.messages.TextMessage;
 import arhangel.dim.core.messages.Type;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import arhangel.dim.container.Context;
 import arhangel.dim.container.InvalidConfigurationException;
 import arhangel.dim.core.net.ConnectionHandler;
 import arhangel.dim.core.net.Protocol;
 import arhangel.dim.core.net.ProtocolException;
-import sun.rmi.runtime.Log;
-
-import static java.lang.Long.parseLong;
 
 /**
  * Клиент для тестирования серверного приложения
@@ -47,7 +52,7 @@ public class Client implements ConnectionHandler {
      */
     private Thread socketThread;
     private Socket socket;
-
+    private Long userId;
     /**
      * С каждым сокетом связано 2 канала in/out
      */
@@ -79,7 +84,7 @@ public class Client implements ConnectionHandler {
     }
 
     public void initSocket() throws IOException {
-        socket = new Socket(host, port);
+        Socket socket = new Socket(host, port);
         in = socket.getInputStream();
         out = socket.getOutputStream();
 
@@ -116,6 +121,42 @@ public class Client implements ConnectionHandler {
     @Override
     public void onMessage(Message msg) {
         log.info("Message received: {}", msg);
+        switch (msg.getType()) {
+            case MSG_STATUS:
+                StatusMessage msgStatus = (StatusMessage) msg;
+                System.out.println(msgStatus.getStatus());
+                break;
+            case MSG_CHAT_LIST_RESULT:
+                ListChatResultMessage msgChatListResult = (ListChatResultMessage) msg;
+                if (msgChatListResult.getChatIds().size() == 0) {
+                    System.out.println("You have no chats yet.");
+                } else {
+                    System.out.println("Your chats: " + String.join(",", msgChatListResult.getChatIds().stream()
+                            .map(Object::toString)
+                            .collect(Collectors.toList())));
+                }
+                break;
+            case MSG_CHAT_HIST_RESULT:
+                HistChatResultMessage histChatResultMessage = (HistChatResultMessage) msg;
+                System.out.println(histChatResultMessage.getChatId());
+                System.out.println("History:");
+                System.out.println(histChatResultMessage.getHistory());
+                break;
+            case MSG_INFO:
+                InfoMessage infoMessage = (InfoMessage) msg;
+                StringBuilder sb = new StringBuilder();
+                sb.append("Info. User: ").append(infoMessage.getUserId())
+                        .append(".");
+                System.out.println(sb.toString());
+                break;
+            case MSG_TEXT:
+                TextMessage textMessage = (TextMessage) msg;
+                System.out.println(msg);
+                break;
+            default:
+                log.error("unsupported type of message");
+                break;
+        }
     }
 
     /**
@@ -141,53 +182,61 @@ public class Client implements ConnectionHandler {
                 break;
             case "/login":
                 if (tokens.length != 3) {
-                    System.out.println("Expected 2 parameters");
-                    return;
+                    log.error("Invalid args number");
+                    break;
                 }
                 LoginMessage loginMessage = new LoginMessage();
                 loginMessage.setType(Type.MSG_LOGIN);
                 loginMessage.setLogin(tokens[1]);
-                loginMessage.setSecret(tokens[2]);
+                loginMessage.setPassword(tokens[2]);
                 send(loginMessage);
                 break;
             case "/help":
                 // TODO: реализация
                 break;
-            case "/text":
-                if (tokens.length != 3) {
-                    System.out.println("Expected 2 parameters");
-                    return;
+            case "/chat_list":
+                if (tokens.length != 1) {
+                    log.error("Invalid args number");
+                    break;
                 }
-                // FIXME: пример реализации для простого текстового сообщения
-                TextMessage sendMessage = new TextMessage();
-                sendMessage.setType(Type.MSG_TEXT);
-                try {
-                    sendMessage.setChatId(parseLong(tokens[1]));
-                } catch (Exception e) {
-                    System.out.println("Expected number");
-                    return;
-                }
-                sendMessage.setText(tokens[2]);
-                send(sendMessage);
+                ListChatMessage listChatMessage = new ListChatMessage();
+                listChatMessage.setType(Type.MSG_CHAT_LIST);
+                send(listChatMessage);
                 break;
-            // TODO: implement another types from wiki
-            //////////
-
-            ///////
-
-
-            case "/text":
+            case "/chat_history":
                 if (tokens.length != 2) {
                     log.error("Invalid args number");
                     break;
                 }
+                HistChatMessage histChatMessage = new HistChatMessage();
+                histChatMessage.setType(Type.MSG_CHAT_HIST);
+                histChatMessage.setChatId(Long.parseLong(tokens[1]));
+                send(histChatMessage);
+                break;
+            case "/text":
+                if (tokens.length < 3) {
+                    log.error("Invalid args number");
+                    break;
+                }
+                int counter = 2;
+                String string = "";
                 TextMessage sendMessage = new TextMessage();
+                sendMessage.setType(Type.MSG_TEXT);
                 sendMessage.setChatId(Long.parseLong(tokens[1]));
-                sendMessage.setText(tokens[2]);
+                while ( counter < tokens.length ) {
+                    string = string + " " + tokens[counter];
+                    counter = counter + 1;
+                }
+                sendMessage.setText(string);
                 send(sendMessage);
                 break;
             case "/info":
+                if (tokens.length > 2) {
+                    log.error("Invalid args number");
+                    break;
+                }
                 InfoMessage infoMessage = new InfoMessage();
+                infoMessage.setType(Type.MSG_INFO);
                 if (tokens.length == 1) {
                     infoMessage.setArg(false);
                 } else {
@@ -197,9 +246,14 @@ public class Client implements ConnectionHandler {
                 send(infoMessage);
                 break;
             case "/chat_create":
+                if (tokens.length != 2) {
+                    log.error("Invalid args number");
+                    break;
+                }
                 CreateChatMessage createChatMessage = new CreateChatMessage();
                 String[] userIdsStr = tokens[1].split(",");
                 List<Long> userIds = new ArrayList<Long>();
+                createChatMessage.setType(Type.MSG_CHAT_CREATE);
                 for (int i = 0; i < userIdsStr.length; ++i) {
                     userIds.add(Long.parseLong(userIdsStr[i]));
                 }
@@ -209,6 +263,7 @@ public class Client implements ConnectionHandler {
 
             default:
                 log.error("Invalid input: " + line);
+
         }
     }
 
@@ -217,21 +272,26 @@ public class Client implements ConnectionHandler {
      */
     @Override
     public void send(Message msg) throws IOException, ProtocolException {
-        log.info(msg.toString());
+        log.info("send to server: " + msg.toString());
         out.write(protocol.encode(msg));
         out.flush(); // принудительно проталкиваем буфер с данными
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() {
+        log.error("Closing socket...");
         if (!socketThread.isInterrupted()) {
             socketThread.interrupt();
         }
         if (!socket.isClosed()) {
-            socket.close();
+            try {
+                socket.close();
+            } catch (IOException e) {
+                log.error("Problem with closing", e);
+
+            }
         }
     }
-
 
     public static void main(String[] args) throws Exception {
 
@@ -252,7 +312,7 @@ public class Client implements ConnectionHandler {
             System.out.println("$");
             while (true) {
                 String input = scanner.nextLine();
-                if ("exit".equals(input)) {
+                if ("q".equals(input)) {
                     return;
                 }
                 try {

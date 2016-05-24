@@ -3,14 +3,14 @@ package arhangel.dim.core.messages;
 import java.io.Serializable;
 import java.util.Objects;
 
-/**
- * Базовый класс для всех сообщений
- */
-public abstract class Message implements Serializable {
+public class Message implements Serializable {
 
     private Long id;
     private Long senderId;
     private Type type;
+    private String message;
+
+    public Message() { }
 
     public Long getId() {
         return id;
@@ -34,6 +34,14 @@ public abstract class Message implements Serializable {
 
     public void setType(Type type) {
         this.type = type;
+    }
+
+    public void setMessage(String message) {
+        this.message = message;
+    }
+
+    public String getMessage() {
+        return message;
     }
 
     @Override
